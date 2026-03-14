@@ -23,10 +23,8 @@ def generator_view(request):
         form = GenerateForm(request.POST, request.FILES)
         if form.is_valid():
             user_secret = form.cleaned_data['sh_secret_field']
-            if _settings.SH_SECRET == user_secret:
-                selfhosted = True
-            else:
-                selfhosted = False
+            # Use self-hosted workflow only when a non-empty secret is explicitly provided.
+            selfhosted = bool(user_secret) and (_settings.SH_SECRET == user_secret)
             platform = form.cleaned_data['platform']
             version = form.cleaned_data['version']
             delayFix = form.cleaned_data['delayFix']
@@ -200,11 +198,17 @@ def generator_view(request):
                 decodedCustom['override-settings']['enable-terminal'] = 'Y' if enableTerminal else 'N'
 
             for line in defaultManual.splitlines():
-                k, value = line.split('=')
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                k, value = line.split('=', 1)
                 decodedCustom['default-settings'][k.strip()] = value.strip()
 
             for line in overrideManual.splitlines():
-                k, value = line.split('=')
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                k, value = line.split('=', 1)
                 decodedCustom['override-settings'][k.strip()] = value.strip()
             
             decodedCustomJson = json.dumps(decodedCustom)
@@ -320,19 +324,33 @@ def generator_view(request):
                 response = requests.post(url, json=data, headers=headers)
                 #print(response)
                 if response.status_code == 204 or response.status_code == 200:
-                    github_data = response.json()
-                    print(github_data)
+                    github_data = {}
+                    # workflow_dispatch usually returns 204 with empty body
+                    if response.status_code == 200 and response.text.strip():
+                        try:
+                            github_data = response.json()
+                        except ValueError:
+                            github_data = {}
+
                     new_github_run.github_run_id = github_data.get('workflow_run_id')
                     new_github_run.status = "in_progress"
                     new_github_run.save()
 
-                    return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform, 'log_url': github_data.get('html_url')})
+                    return render(request, 'waiting.html', {
+                        'filename': filename,
+                        'uuid': myuuid,
+                        'status': "Starting generator...please wait",
+                        'platform': platform,
+                        'log_url': github_data.get('html_url')
+                    })
                 else:
-                    #new_github_run.delete()
-                    return JsonResponse({"error": "GitHub rejected the start request"}, status=500)
+                    return JsonResponse({
+                        "error": "GitHub rejected the start request",
+                        "status_code": response.status_code,
+                        "details": response.text[:500]
+                    }, status=400)
             except Exception as e:
-                #new_github_run.delete()
-                return JsonResponse({"error": f"Connection error: {str(e)}"}, status=500)
+                return JsonResponse({"error": f"Connection error: {str(e)}"}, status=502)
     else:
         form = GenerateForm()
     #return render(request, 'maintenance.html')
@@ -347,9 +365,11 @@ def check_for_file(request):
     uuid = request.GET.get('uuid')
     platform = request.GET.get('platform')
     gh_run = get_object_or_404(GithubRun, uuid=uuid)
-    github_log_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
+    github_log_url = None
+    if gh_run.github_run_id:
+        github_log_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
 
-    if gh_run.status not in ['success', 'failure', 'cancelled', 'timed_out', 'skipped']:
+    if gh_run.github_run_id and gh_run.status not in ['success', 'failure', 'cancelled', 'timed_out', 'skipped']:
         headers = {
             "Authorization": f"Bearer {_settings.GHBEARER}",
             "Accept": "application/vnd.github+json"

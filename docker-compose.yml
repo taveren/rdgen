@@ -1,8 +1,8 @@
 services:
   rdgen:
     container_name: rdgen
-    image: bryangerlach/rdgen:latest
-    pull_policy: always
+    build: .
+    image: rdgen:local
     restart: unless-stopped
     env_file:
       - .env
