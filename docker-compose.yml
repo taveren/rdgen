@@ -15,6 +15,7 @@ services:
       GHBRANCH: "${GHBRANCH:-master}"
       PROTOCOL: "${PROTOCOL:-https}"
       REPONAME: "${REPONAME:-rdgen}"
+      SH_SECRET: "${SH_SECRET:-}"
     ports:
       - "${RDGEN_PORT:-8001}:8000"
     volumes:

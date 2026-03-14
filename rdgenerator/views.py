@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.core.files.base import ContentFile
 import os
+import secrets
 import re
 import requests
 import base64
@@ -21,6 +22,11 @@ def generator_view(request):
     if request.method == 'POST':
         form = GenerateForm(request.POST, request.FILES)
         if form.is_valid():
+            user_secret = form.cleaned_data['sh_secret_field']
+            if _settings.SH_SECRET == user_secret:
+                selfhosted = True
+            else:
+                selfhosted = False
             platform = form.cleaned_data['platform']
             version = form.cleaned_data['version']
             delayFix = form.cleaned_data['delayFix']
@@ -225,6 +231,8 @@ def generator_view(request):
             ####from here run the github action, we need user, repo, access token.
             if platform == 'windows':
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows.yml/dispatches'
+                if selfhosted:
+                    url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/sh-generator-windows.yml/dispatches'
             if platform == 'windows-x86':
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows-x86.yml/dispatches'
             elif platform == 'linux':
@@ -235,6 +243,8 @@ def generator_view(request):
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-macos.yml/dispatches'
             else:
                 url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows.yml/dispatches'
+                if selfhosted:
+                    url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/sh-generator-windows.yml/dispatches'
 
             #url = 'https://api.github.com/repos/'+_settings.GHUSER+'/rustdesk/actions/workflows/test.yml/dispatches'  
             inputs_raw = {
@@ -278,7 +288,6 @@ def generator_view(request):
                 zf.setpassword(_settings.ZIP_PASSWORD.encode())
                 zf.write(temp_json_path, arcname="secrets.json")
 
-            # 4. Cleanup the plain JSON file immediately
             if os.path.exists(temp_json_path):
                 os.remove(temp_json_path)
 
@@ -293,40 +302,95 @@ def generator_view(request):
                 "inputs":{
                     "version":version,
                     "zip_url":zip_url
-                }
+                },
+                "return_run_details": True
             } 
             #print(data)
             headers = {
                 'Accept':  'application/vnd.github+json',
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer '+_settings.GHBEARER,
-                'X-GitHub-Api-Version': '2022-11-28'
+                'X-GitHub-Api-Version': '2026-03-10'
             }
-            create_github_run(myuuid)
-            response = requests.post(url, json=data, headers=headers)
-            print(response)
-            if response.status_code == 204 or response.status_code == 200:
-                return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform})
-            else:
-                return JsonResponse({"error": "Something went wrong"})
+            new_github_run = GithubRun(
+                uuid=myuuid,
+                status="Starting generator...please wait"
+            )
+            try:
+                response = requests.post(url, json=data, headers=headers)
+                #print(response)
+                if response.status_code == 204 or response.status_code == 200:
+                    github_data = response.json()
+                    print(github_data)
+                    new_github_run.github_run_id = github_data.get('workflow_run_id')
+                    new_github_run.status = "in_progress"
+                    new_github_run.save()
+
+                    return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform, 'log_url': github_data.get('html_url')})
+                else:
+                    #new_github_run.delete()
+                    return JsonResponse({"error": "GitHub rejected the start request"}, status=500)
+            except Exception as e:
+                #new_github_run.delete()
+                return JsonResponse({"error": f"Connection error: {str(e)}"}, status=500)
     else:
         form = GenerateForm()
     #return render(request, 'maintenance.html')
     return render(request, 'generator.html', {'form': form})
 
 
-def check_for_file(request):
-    filename = request.GET['filename']
-    uuid = request.GET['uuid']
-    platform = request.GET['platform']
-    gh_run = GithubRun.objects.filter(Q(uuid=uuid)).first()
-    status = gh_run.status
+from django.shortcuts import render, get_object_or_404
+from django.db.models import Q
 
-    #if file_exists:
-    if status == "Success":
-        return render(request, 'generated.html', {'filename': filename, 'uuid':uuid, 'platform':platform})
+def check_for_file(request):
+    filename = request.GET.get('filename')
+    uuid = request.GET.get('uuid')
+    platform = request.GET.get('platform')
+    gh_run = get_object_or_404(GithubRun, uuid=uuid)
+    github_log_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
+
+    if gh_run.status not in ['success', 'failure', 'cancelled', 'timed_out', 'skipped']:
+        headers = {
+            "Authorization": f"Bearer {_settings.GHBEARER}",
+            "Accept": "application/vnd.github+json"
+        }
+        api_url = f"https://api.github.com/repos/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
+        
+        try:
+            gh_response = requests.get(api_url, headers=headers)
+            if gh_response.status_code == 200:
+                gh_data = gh_response.json()
+                
+                if gh_data['status'] == 'completed':
+                    gh_run.status = gh_data['conclusion']
+                    gh_run.save()
+        except Exception as e:
+            print(f"Error checking GitHub: {e}")
+    
+    if gh_run.status == "success":
+        return render(request, 'generated.html', {
+            'filename': filename, 
+            'uuid': uuid, 
+            'platform': platform
+        })
+        
+    elif gh_run.status in ['failure', 'cancelled', 'timed_out', 'skipped', 'action_required']:
+        return render(request, 'failure.html', {
+            'log_url': github_log_url, 
+            'filename': filename, 
+            'uuid': uuid, 
+            'platform': platform,
+            'status': gh_run.status
+        })
+        
     else:
-        return render(request, 'waiting.html', {'filename':filename, 'uuid':uuid, 'status':status, 'platform':platform})
+        return render(request, 'waiting.html', {
+            'filename': filename, 
+            'uuid': uuid, 
+            'status': gh_run.status, 
+            'platform': platform, 
+            'log_url': github_log_url
+        })
 
 def download(request):
     filename = request.GET['filename']
@@ -432,7 +496,7 @@ def startgh(request):
         'Accept':  'application/vnd.github+json',
         'Content-Type': 'application/json',
         'Authorization': 'Bearer '+_settings.GHBEARER,
-        'X-GitHub-Api-Version': '2022-11-28'
+        'X-GitHub-Api-Version': '2026-03-10'
     }
     response = requests.post(url, json=data, headers=headers)
     print(response)

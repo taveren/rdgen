@@ -28,13 +28,15 @@ GHBRANCH = os.environ.get("GHBRANCH",'master')
 ZIP_PASSWORD = os.environ.get("ZIP_PASSWORD",'insecure')
 PROTOCOL = os.environ.get("PROTOCOL", 'https')
 REPONAME = os.environ.get("REPONAME", 'rdgen')
+SH_SECRET = os.environ.get('SH_SECRET', 'secret')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG_ENV = os.environ.get("DEBUG", "False")
+DEBUG = DEBUG_ENV.lower() in ['true', '1', 't']
 
 ALLOWED_HOSTS = ['*']
 #CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split()
