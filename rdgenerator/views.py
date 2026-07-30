@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 from django.shortcuts import render
 from django.core.files.base import ContentFile
 import os
@@ -28,7 +28,6 @@ def generator_view(request):
             platform = form.cleaned_data['platform']
             version = form.cleaned_data['version']
             delayFix = form.cleaned_data['delayFix']
-            cycleMonitor = form.cleaned_data['cycleMonitor']
             xOffline = form.cleaned_data['xOffline']
             hidecm = form.cleaned_data['hidecm']
             removeNewVersionNotif = form.cleaned_data['removeNewVersionNotif']
@@ -98,7 +97,11 @@ def generator_view(request):
             myuuid = str(uuid.uuid4())
             protocol = _settings.PROTOCOL
             host = request.get_host()
-            full_url = f"{protocol}://{host}"
+            # --- Fix: Port in URL for setup / download-zip
+            # --- protocol = _settings.PROTOCOL
+            # --- host = request.get_host()
+            # --- full_url = f"{protocol}://{host}"
+            full_url = f"{protocol}://{host}" if _settings.GENURL else f"{_settings.PROTOCOL}://{request.get_host()}"
             try:
                 iconfile = form.cleaned_data.get('iconfile')
                 if not iconfile:
@@ -225,7 +228,6 @@ def generator_view(request):
             # extras['downloadLink'] = downloadLink
             # extras['delayFix'] = 'true' if delayFix else 'false'
             # extras['rdgen'] = 'true'
-            # extras['cycleMonitor'] = 'true' if cycleMonitor else 'false'
             # extras['xOffline'] = 'true' if xOffline else 'false'
             # extras['removeNewVersionNotif'] = 'true' if removeNewVersionNotif else 'false'
             # extras['compname'] = compname
@@ -272,7 +274,6 @@ def generator_view(request):
                 "downloadLink":downloadLink,
                 "delayFix": 'true' if delayFix else 'false',
                 "rdgen":'true',
-                "cycleMonitor": 'true' if cycleMonitor else 'false',
                 "xOffline": 'true' if xOffline else 'false',
                 "removeNewVersionNotif": 'true' if removeNewVersionNotif else 'false',
                 "compname": compname,
@@ -415,14 +416,13 @@ def check_for_file(request):
 def download(request):
     filename = request.GET['filename']
     uuid = request.GET['uuid']
-    #filename = filename+".exe"
-    file_path = os.path.join('exe',uuid,filename)
+    file_path = os.path.join('exe', uuid, filename)
     with open(file_path, 'rb') as file:
-        response = HttpResponse(file, headers={
-            'Content-Type': 'application/vnd.microsoft.portable-executable',
-            'Content-Disposition': f'attachment; filename="{filename}"'
-        })
-
+        content = file.read()
+    response = HttpResponse(content, headers={
+        'Content-Type': 'application/vnd.microsoft.portable-executable',
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    })
     return response
 
 def get_png(request):
@@ -584,8 +584,10 @@ def cleanup_secrets(request):
 
 def get_zip(request):
     filename = request.GET['filename']
-    #filename = filename+".exe"
-    file_path = os.path.join('temp_zips',filename)
+    base_dir = os.path.abspath('temp_zips')
+    file_path = os.path.abspath(os.path.join(base_dir, filename))
+    if not file_path.startswith(base_dir + os.sep):
+        return HttpResponseForbidden("Invalid filename")
     with open(file_path, 'rb') as file:
         response = HttpResponse(file, headers={
             'Content-Type': 'application/vnd.microsoft.portable-executable',
