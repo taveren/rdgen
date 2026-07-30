@@ -485,7 +485,9 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build msi
+        id: build_msi
         if: env.UPLOAD_ARTIFACT == 'true'
+        continue-on-error: true
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -510,13 +512,16 @@ jobs:
           Move-Item $msiPath ../../SignOutput/rustdesk.msi -Force
           Get-FileHash ../../SignOutput/rustdesk.msi -Algorithm SHA256
           Pop-Location
+          "MSI_BUILT=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: zip exe and msi
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Test-Path ./SignOutput/*.msi)) { throw "No MSI in SignOutput before zip" }
-          Compress-Archive -Path ./SignOutput/*.exe, ./SignOutput/*.msi -DestinationPath ./SignOutput/unsigned_files.zip -CompressionLevel Fastest
+          if (-not (Test-Path ./SignOutput/rustdesk.exe)) { throw "EXE missing in SignOutput" }
+          $paths = @('./SignOutput/rustdesk.exe')
+          if (Test-Path ./SignOutput/rustdesk.msi) { $paths += './SignOutput/rustdesk.msi' }
+          Compress-Archive -Path $paths -DestinationPath ./SignOutput/unsigned_files.zip -CompressionLevel Fastest -Force
 
       - name: sign exe and msi
         shell: bash
@@ -547,6 +552,7 @@ jobs:
           Move-Item ./SignOutput/rustdesk.exe "./SignOutput/${{ env.filename }}.exe" -Force
 
       - name: rename rustdesk.msi to filename.msi
+        if: env.MSI_BUILT == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -564,9 +570,12 @@ jobs:
           command: |
             set -euo pipefail
             test -f "./SignOutput/${{ env.filename }}.exe"
-            test -f "./SignOutput/${{ env.filename }}.msi"
             curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
-            curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+            if [ -f "./SignOutput/${{ env.filename }}.msi" ]; then
+              curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+            else
+              echo "MSI not present; EXE uploaded only"
+            fi
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}
@@ -579,9 +588,19 @@ jobs:
           command: |
             set -euo pipefail
             test -f "./SignOutput/${{ env.filename }}.exe"
-            test -f "./SignOutput/${{ env.filename }}.msi"
             curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" ${{ env.apiServer }}/api/save_custom_client
-            curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" ${{ env.apiServer }}/api/save_custom_client
+            if [ -f "./SignOutput/${{ env.filename }}.msi" ]; then
+              curl -f -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" ${{ env.apiServer }}/api/save_custom_client
+            else
+              echo "MSI not present; EXE uploaded only"
+            fi
+
+      - name: Require MSI artifact
+        if: env.UPLOAD_ARTIFACT == 'true' && env.MSI_BUILT != 'true'
+        shell: bash
+        run: |
+          echo "::error::MSI package was not produced. EXE may still be available for download."
+          exit 1
 
   cleanup:
     needs: [build-for-windows-flutter]

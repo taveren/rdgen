@@ -405,12 +405,16 @@ def check_for_file(request):
         })
         
     elif gh_run.status in ['failure', 'cancelled', 'timed_out', 'skipped', 'action_required']:
+        exe_available = os.path.exists(os.path.join('exe', uuid, f"{filename}.exe"))
+        msi_available = os.path.exists(os.path.join('exe', uuid, f"{filename}.msi"))
         return render(request, 'failure.html', {
             'log_url': github_log_url, 
             'filename': filename, 
             'uuid': uuid, 
             'platform': platform,
-            'status': gh_run.status
+            'status': gh_run.status,
+            'exe_available': exe_available,
+            'msi_available': msi_available,
         })
         
     else:

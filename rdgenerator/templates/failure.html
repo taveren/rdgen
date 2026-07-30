@@ -93,8 +93,15 @@
 
         <div class="download-section">
             {% if platform == 'windows' %}
+                {% if exe_available %}
                 <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
+                {% endif %}
+                {% if msi_available %}
                 <a href='/download?filename={{filename}}.msi&uuid={{uuid}}' class="download-link">Download {{filename}}.msi</a>
+                {% endif %}
+                {% if not exe_available and not msi_available %}
+                <p>No Windows artifacts were uploaded for this run.</p>
+                {% endif %}
             {% elif platform == 'windows-x86' %}
                 <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
             {% elif platform == 'linux' %}
