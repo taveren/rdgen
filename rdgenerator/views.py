@@ -96,12 +96,16 @@ def generator_view(request):
                 appname = "rustdesk"
             myuuid = str(uuid.uuid4())
             protocol = _settings.PROTOCOL
-            host = request.get_host()
-            # --- Fix: Port in URL for setup / download-zip
-            # --- protocol = _settings.PROTOCOL
-            # --- host = request.get_host()
-            # --- full_url = f"{protocol}://{host}"
-            full_url = f"{protocol}://{host}" if _settings.GENURL else f"{_settings.PROTOCOL}://{request.get_host()}"
+            # Prefer GENURL when set (handles reverse-proxy / custom public URL).
+            configured_url = (_settings.GENURL or "").strip()
+            if configured_url:
+                if configured_url.startswith("http://") or configured_url.startswith("https://"):
+                    full_url = configured_url
+                else:
+                    full_url = f"{protocol}://{configured_url}"
+            else:
+                host = request.get_host()
+                full_url = f"{protocol}://{host}"
             try:
                 iconfile = form.cleaned_data.get('iconfile')
                 if not iconfile:
@@ -389,10 +393,15 @@ def check_for_file(request):
             print(f"Error checking GitHub: {e}")
     
     if gh_run.status == "success":
+        msi_available = False
+        if platform == "windows":
+            msi_path = os.path.join('exe', uuid, f"{filename}.msi")
+            msi_available = os.path.exists(msi_path)
         return render(request, 'generated.html', {
             'filename': filename, 
             'uuid': uuid, 
-            'platform': platform
+            'platform': platform,
+            'msi_available': msi_available
         })
         
     elif gh_run.status in ['failure', 'cancelled', 'timed_out', 'skipped', 'action_required']:

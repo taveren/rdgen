@@ -128,7 +128,13 @@
         <div class="download-section">
             {% if platform == 'windows' %}
                 <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
-                <a href='/download?filename={{filename}}.msi&uuid={{uuid}}' class="download-link">Download {{filename}}.msi</a>
+                {% if msi_available %}
+                    <a href='/download?filename={{filename}}.msi&uuid={{uuid}}' class="download-link">Download {{filename}}.msi</a>
+                {% else %}
+                    <p class="platform-note" style="margin: 10px 0 0 0;">
+                        MSI package was not produced in this run. EXE is ready.
+                    </p>
+                {% endif %}
             {% elif platform == 'windows-x86' %}
                 <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
             {% elif platform == 'linux' %}
