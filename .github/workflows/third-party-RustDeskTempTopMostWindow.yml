@@ -28,8 +28,7 @@ on:
             default: 'Windows10'
 
 env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "${{ vars.FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 }}"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   project_path: WindowInjection/WindowInjection.vcxproj
 
 jobs:
@@ -71,7 +70,7 @@ jobs:
 
         # Build. commit 53b548a5398624f7149a382000397993542ad796 is tag v0.3
       - name: Build the project
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
