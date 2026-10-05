@@ -14,3 +14,10 @@ LICENSE
 *.pyc
 .venv
 db.sqlite3
+# runtime volumes, not part of the image
+exe
+png
+temp_zips
+media
+LOCAL_README.md
+bicintech(2).json

@@ -1,3 +1,81 @@
+
+import json
+import os
+import re
+import time
+import urllib.request
+
+_VERSION_CACHE = "/tmp/rdgen-rustdesk-versions.json"
+_VERSION_TTL = 600
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+_FALLBACK_VERSIONS = [
+    ("master", "nightly"),
+    ("1.5.0", "1.5.0"),
+    ("1.4.9", "1.4.9"),
+    ("1.4.8", "1.4.8"),
+    ("1.4.7", "1.4.7"),
+    ("1.4.6", "1.4.6"),
+    ("1.4.5", "1.4.5"),
+    ("1.4.4", "1.4.4"),
+    ("1.4.3", "1.4.3"),
+    ("1.4.2", "1.4.2"),
+    ("1.4.1", "1.4.1"),
+    ("1.4.0", "1.4.0"),
+]
+
+def _version_key(tag):
+    return tuple(int(part) for part in tag.split("."))
+
+def _read_version_cache():
+    try:
+        with open(_VERSION_CACHE) as fh:
+            data = json.load(fh)
+        if isinstance(data.get("choices"), list) and data["choices"]:
+            return data
+    except Exception:
+        return None
+    return None
+
+def _write_version_cache(choices, fetched):
+    tmp = _VERSION_CACHE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump({"fetched": fetched, "choices": choices}, fh)
+    os.replace(tmp, _VERSION_CACHE)
+
+def rustdesk_version_choices():
+    now = time.time()
+    cached = _read_version_cache()
+    if cached and now - cached["fetched"] < _VERSION_TTL:
+        return cached["choices"]
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/rustdesk/rustdesk/releases?per_page=100",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "rdgen",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            releases = json.load(resp)
+        tags = []
+        for release in releases:
+            if release.get("draft") or release.get("prerelease"):
+                continue
+            tag = release.get("tag_name") or ""
+            if _VERSION_RE.match(tag) and _version_key(tag) >= (1, 4, 0):
+                tags.append(tag)
+        tags = sorted(set(tags), key=_version_key, reverse=True)
+        if not tags:
+            raise RuntimeError("no stable releases")
+        choices = [("master", "nightly")] + [(tag, tag) for tag in tags]
+        _write_version_cache(choices, now)
+        return choices
+    except Exception as exc:
+        print(f"rustdesk version list fallback: {exc}")
+        if cached:
+            return cached["choices"]
+        return list(_FALLBACK_VERSIONS)
+
 from django import forms
 from PIL import Image
 
@@ -5,8 +83,18 @@ class GenerateForm(forms.Form):
     sh_secret_field = forms.CharField(required=False)
     #Platform
     platform = forms.ChoiceField(choices=[('windows','Windows 64Bit'),('windows-x86','Windows 32Bit'),('linux','Linux'),('android','Android'),('macos','macOS')], initial='windows')
-    version = forms.ChoiceField(choices=[('master','nightly'),('1.4.9','1.4.9'),('1.4.8','1.4.8'),('1.4.7','1.4.7'),('1.4.6','1.4.6'),('1.4.5','1.4.5'),('1.4.4','1.4.4'),('1.4.3','1.4.3'),('1.4.2','1.4.2'),('1.4.1','1.4.1'),('1.4.0','1.4.0')], initial='1.4.9')
+    version = forms.ChoiceField(choices=_FALLBACK_VERSIONS, initial="1.5.0")
     help_text="'master' is the development version (nightly build) with the latest features but may be less stable"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = rustdesk_version_choices()
+        self.fields["version"].choices = choices
+        if not self.is_bound:
+            self.fields["version"].initial = next(
+                value for value, _label in choices if value != "master"
+            )
+
     delayFix = forms.BooleanField(initial=True, required=False)
 
     #General

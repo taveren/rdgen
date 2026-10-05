@@ -239,6 +239,11 @@ jobs:
         with:
           prefix-key: ${{ matrix.job.os }}-sciter
 
+      - name: Pin vcpkg to RustDesk baseline
+        shell: bash
+        run: |
+          python3 -c 'import json,os; p=json.load(open("vcpkg.json"))["vcpkg-configuration"]["default-registry"]["baseline"]; assert len(p)>=7 and set(p)<=set("0123456789abcdef"); open(os.environ["GITHUB_ENV"],"a").write("VCPKG_COMMIT_ID=%s\n"%p); print(p)'
+
       - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@v11
         with:
